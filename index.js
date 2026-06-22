@@ -68,9 +68,25 @@ const Config = Schema.object({
 
 function apply(ctx, config) {
   let rules = loadRules()
-  if (rules.length === 0 && config.rules && config.rules.length > 0) {
+  // 设置页编辑时同步到 JSON：config 中数量 ≥ JSON 则以 config 为准
+  if (config.rules && config.rules.length >= rules.length) {
     rules = config.rules
     saveRules(rules)
+  }
+
+  // 展开关键词中可能包含逗号的条目（兼容设置页多词写在一个框里的情况）
+  function flatKeywords(keywords) {
+    if (!keywords) return []
+    const result = []
+    for (const kw of keywords) {
+      if (typeof kw !== 'string' || !kw) continue
+      if (kw.includes(',')) {
+        result.push(...kw.split(',').map(s => s.trim()).filter(Boolean))
+      } else {
+        result.push(kw)
+      }
+    }
+    return result
   }
 
   function syncRules() {
@@ -107,9 +123,8 @@ function apply(ctx, config) {
         if (!rule.weekdays.includes(today)) continue
       }
 
-      // 关键词匹配
-      const matched = (rule.keywords || []).some(kw => {
-        if (!kw) return false
+      // 关键词匹配（自动展开逗号分隔的关键词）
+      const matched = flatKeywords(rule.keywords).some(kw => {
         if (rule.matchMode === 'regex') {
           try { return new RegExp(kw).test(text) } catch { return false }
         }
@@ -277,8 +292,7 @@ function apply(ctx, config) {
         if (rule.weekdays && rule.weekdays.length > 0) {
           if (!rule.weekdays.includes(today)) continue
         }
-        const hit = (rule.keywords || []).some(kw => {
-          if (!kw) return false
+        const hit = flatKeywords(rule.keywords).some(kw => {
           if (rule.matchMode === 'regex') {
             try { return new RegExp(kw).test(text) } catch { return false }
           }
