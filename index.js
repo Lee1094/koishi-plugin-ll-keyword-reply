@@ -17,29 +17,41 @@ function saveRules(rules) {
   fs.writeFileSync(RULES_FILE, JSON.stringify(rules, null, 2), 'utf-8')
 }
 
-// 规则对象的 Schema 定义（插件设置页 & 命令共用）
+// 按群覆盖回复
+const GroupOverride = Schema.object({
+  group: Schema.string()
+    .description('群号'),
+  reply: Schema.string()
+    .default('')
+    .description('该群的回复内容'),
+  replyType: Schema.union(['text', 'image'])
+    .default('text')
+    .description('该群的回复类型'),
+})
+
+// 规则对象 Schema（插件设置页可见全部字段）
 const RuleItem = Schema.object({
   name: Schema.string()
     .default('')
-    .description('规则名称（用于标识）'),
+    .description('规则名称'),
   keywords: Schema.array(Schema.string())
     .default([])
     .description('关键词列表（多个用逗号分隔）'),
   matchMode: Schema.union(['contains', 'regex'])
     .default('contains')
-    .description('匹配模式：contains=包含匹配 / regex=正则匹配'),
-  groups: Schema.array(Schema.string())
-    .default([])
-    .description('生效群号（留空=所有群）'),
+    .description('匹配模式'),
   weekdays: Schema.array(Schema.number())
     .default([])
-    .description('生效星期 0-6（留空=每天；0=周日 1=周一 … 6=周六）'),
-  replyType: Schema.union(['text', 'image'])
-    .default('text')
-    .description('回复类型：text=文字 / image=图片URL'),
+    .description('生效星期 0-6（留空=每天）'),
   reply: Schema.string()
     .default('')
-    .description('回复内容（文字或图片URL）'),
+    .description('默认回复（所有群通用，留空则只对 groupOverrides 中的群生效）'),
+  replyType: Schema.union(['text', 'image'])
+    .default('text')
+    .description('默认回复类型'),
+  groupOverrides: Schema.array(GroupOverride)
+    .default([])
+    .description('特定群的回复（优先级高于默认回复）'),
   enabled: Schema.boolean()
     .default(true)
     .description('是否启用'),
@@ -51,11 +63,10 @@ const Config = Schema.object({
     .description('管理员QQ号（留空则所有人可用管理命令）'),
   rules: Schema.array(RuleItem)
     .default([])
-    .description('关键词规则列表（在此配置或使用命令管理）'),
+    .description('关键词规则列表'),
 })
 
 function apply(ctx, config) {
-  // 加载规则：优先从 JSON 文件（命令写入），首次使用取配置页的初始值
   let rules = loadRules()
   if (rules.length === 0 && config.rules && config.rules.length > 0) {
     rules = config.rules
@@ -71,12 +82,21 @@ function apply(ctx, config) {
     return config.admins.includes(String(userId))
   }
 
-  // ===== 中间件：拦截消息，匹配规则 =====
+  // 获取某条规则在指定群的实际回复（覆盖 > 默认）
+  function getReply(rule, groupId) {
+    const override = (rule.groupOverrides || []).find(o => o.group === groupId)
+    if (override && override.reply) {
+      return { reply: override.reply, replyType: override.replyType || 'text' }
+    }
+    return { reply: rule.reply, replyType: rule.replyType || 'text' }
+  }
+
+  // ===== 中间件 =====
   ctx.middleware(async (session, next) => {
     const text = session.content?.trim()
     if (!text) return next()
 
-    const today = new Date().getDay()  // 0=周日
+    const today = new Date().getDay()
     const groupId = session.guildId ? String(session.guildId) : ''
 
     for (const rule of rules) {
@@ -87,63 +107,66 @@ function apply(ctx, config) {
         if (!rule.weekdays.includes(today)) continue
       }
 
-      // 群过滤
-      if (rule.groups && rule.groups.length > 0) {
-        if (!rule.groups.includes(groupId)) continue
-      }
-
       // 关键词匹配
       const matched = (rule.keywords || []).some(kw => {
         if (!kw) return false
         if (rule.matchMode === 'regex') {
-          try {
-            return new RegExp(kw).test(text)
-          } catch { return false }
+          try { return new RegExp(kw).test(text) } catch { return false }
         }
         return text.includes(kw)
       })
-
       if (!matched) continue
 
-      // 发送回复
-      if (rule.replyType === 'image') {
-        await session.send(`[CQ:image,file=${rule.reply}]`)
+      // 获取实际回复（按群覆盖）
+      const { reply, replyType } = getReply(rule, groupId)
+      if (!reply) continue  // 该群无回复 → 跳过
+
+      // 发送
+      if (replyType === 'image') {
+        await session.send(`[CQ:image,file=${reply}]`)
       } else {
-        await session.send(rule.reply)
+        await session.send(reply)
       }
-      return // 命中一个规则即停止
+      return
     }
 
     return next()
   })
 
-  // ===== 管理命令 =====
+  // ===== 命令 =====
   ctx.command('keyword', '关键词回复管理')
     .action(() =>
       '关键词回复管理命令：\n' +
       'keyword.list — 查看所有规则\n' +
-      'keyword.add <关键词> <回复> — 添加规则\n' +
-      'keyword.edit <ID> <关键词> <回复> — 编辑规则\n' +
+      'keyword.add <关键词> <默认回复> — 添加规则\n' +
+      'keyword.edit <ID> <关键词> <默认回复> — 编辑规则\n' +
       'keyword.remove <ID> — 删除规则\n' +
-      'keyword.toggle <ID> — 启用/禁用规则\n' +
+      'keyword.toggle <ID> — 启用/禁用\n' +
+      'keyword.group <ID> <群号> <回复> — 设置某群的专属回复\n' +
+      'keyword.ungroup <ID> <群号> — 移除某群的专属回复\n' +
       'keyword.test <文本> — 测试匹配'
     )
 
   ctx.command('keyword.list', '查看所有关键词规则')
-    .action(() => {
+    .action(({ session }) => {
       if (!rules.length) return '暂无关键词规则'
+      const currentGroup = session.guildId ? String(session.guildId) : ''
       return rules.map((r, i) => {
         const status = r.enabled !== false ? '✅' : '⛔'
         const mode = r.matchMode === 'regex' ? '[正则]' : '[包含]'
         const kws = (r.keywords || []).join(', ')
-        const reply = r.replyType === 'image'
-          ? `[图片] ${r.reply}`
-          : (r.reply || '').substring(0, 40) + ((r.reply || '').length > 40 ? '...' : '')
-        return `${status} #${i} ${mode} ${r.name || '未命名'}\n  关键词: ${kws}\n  回复: ${reply}`
+        const defaultReply = r.reply
+          ? (r.replyType === 'image' ? '[图片]' : '') + r.reply.substring(0, 30)
+          : '(无默认)'
+        const overrides = (r.groupOverrides || []).map(o =>
+          `    ${o.group}: ${o.replyType === 'image' ? '[图片]' : ''}${o.reply}`
+        ).join('\n')
+        const ovInfo = overrides ? `\n  按群覆盖:\n${overrides}` : ''
+        return `${status} #${i} ${mode} ${r.name || '未命名'}\n  关键词: ${kws}\n  默认: ${defaultReply}${ovInfo}`
       }).join('\n')
     })
 
-  ctx.command('keyword.add <keywords:string> <reply:text>', '添加关键词回复规则')
+  ctx.command('keyword.add <keywords:string> <reply:text>', '添加关键词规则（所有群默认回复）')
     .option('name', '-n <name:string>')
     .option('type', '-t <type:string>')
     .option('matchMode', '-m <mode:string>')
@@ -151,25 +174,24 @@ function apply(ctx, config) {
       if (!isAdmin(String(session.userId))) return '权限不足'
       const kwList = keywords.split(',').map(s => s.trim()).filter(Boolean)
       if (!kwList.length) return '关键词不能为空（多个用逗号分隔）'
-      if (!reply) return '回复内容不能为空'
+      if (!reply) return '默认回复不能为空'
 
       const rule = {
         name: options.name || kwList[0],
         keywords: kwList,
         matchMode: options.matchMode || 'contains',
-        groups: [],
         weekdays: [],
-        replyType: options.type || 'text',
         reply,
+        replyType: options.type || 'text',
+        groupOverrides: [],
         enabled: true,
       }
-
       rules.push(rule)
       syncRules()
       return `✅ 已添加规则 #${rules.length - 1}: ${rule.name} [${rule.matchMode}]`
     })
 
-  ctx.command('keyword.edit <id:number> <keywords:string> <reply:text>', '编辑关键词规则')
+  ctx.command('keyword.edit <id:number> <keywords:string> <reply:text>', '编辑规则的默认关键词和回复')
     .option('name', '-n <name:string>')
     .option('type', '-t <type:string>')
     .option('matchMode', '-m <mode:string>')
@@ -177,15 +199,11 @@ function apply(ctx, config) {
       if (!isAdmin(String(session.userId))) return '权限不足'
       const rule = rules[id]
       if (!rule) return `未找到规则 #${id}`
-
-      if (keywords) {
-        rule.keywords = keywords.split(',').map(s => s.trim()).filter(Boolean)
-      }
+      if (keywords) rule.keywords = keywords.split(',').map(s => s.trim()).filter(Boolean)
       if (reply) rule.reply = reply
       if (options.name) rule.name = options.name
       if (options.type) rule.replyType = options.type
       if (options.matchMode) rule.matchMode = options.matchMode
-
       syncRules()
       return `✅ 已更新规则 #${id}: ${rule.name}`
     })
@@ -210,7 +228,41 @@ function apply(ctx, config) {
       return `${rule.enabled ? '✅ 已启用' : '⛔ 已禁用'} 规则 #${id}: ${rule.name || '未命名'}`
     })
 
-  ctx.command('keyword.test <text:text>', '测试关键词匹配（显示当前群/星期下会命中的规则）')
+  ctx.command('keyword.group <id:number> <group:string> <reply:text>', '为某条规则设置特定群的专属回复')
+    .option('type', '-t <type:string>')
+    .action(({ session, options }, id, group, reply) => {
+      if (!isAdmin(String(session.userId))) return '权限不足'
+      const rule = rules[id]
+      if (!rule) return `未找到规则 #${id}`
+      if (!group) return '群号不能为空'
+      if (!reply) return '回复内容不能为空'
+
+      if (!rule.groupOverrides) rule.groupOverrides = []
+      const idx = rule.groupOverrides.findIndex(o => o.group === group)
+      const ov = { group, reply, replyType: options.type || 'text' }
+      if (idx >= 0) {
+        rule.groupOverrides[idx] = ov
+      } else {
+        rule.groupOverrides.push(ov)
+      }
+      syncRules()
+      return `✅ 规则 #${id} 在群 ${group} 的回复已设为: ${reply.substring(0, 30)}`
+    })
+
+  ctx.command('keyword.ungroup <id:number> <group:string>', '移除某条规则在特定群的专属回复')
+    .action(({ session }, id, group) => {
+      if (!isAdmin(String(session.userId))) return '权限不足'
+      const rule = rules[id]
+      if (!rule) return `未找到规则 #${id}`
+      if (!rule.groupOverrides) return `规则 #${id} 没有群覆盖设置`
+      const idx = rule.groupOverrides.findIndex(o => o.group === group)
+      if (idx < 0) return `规则 #${id} 没有群 ${group} 的覆盖设置`
+      rule.groupOverrides.splice(idx, 1)
+      syncRules()
+      return `✅ 已移除规则 #${id} 在群 ${group} 的专属回复，恢复使用默认回复`
+    })
+
+  ctx.command('keyword.test <text:text>', '测试关键词匹配')
     .action(({ session }, text) => {
       if (!isAdmin(String(session.userId))) return '权限不足'
       if (!text) return '请输入测试文本'
@@ -225,9 +277,6 @@ function apply(ctx, config) {
         if (rule.weekdays && rule.weekdays.length > 0) {
           if (!rule.weekdays.includes(today)) continue
         }
-        if (rule.groups && rule.groups.length > 0) {
-          if (!rule.groups.includes(groupId)) continue
-        }
         const hit = (rule.keywords || []).some(kw => {
           if (!kw) return false
           if (rule.matchMode === 'regex') {
@@ -235,12 +284,20 @@ function apply(ctx, config) {
           }
           return text.includes(kw)
         })
-        if (hit) matched.push({ index: i, rule })
+        if (hit) {
+          const { reply, replyType } = getReply(rule, groupId)
+          matched.push({ index: i, rule, effectiveReply: reply, effectiveType: replyType })
+        }
       }
 
       if (!matched.length) return `"${text}" 没有匹配到任何规则`
       return `"${text}" 匹配到 ${matched.length} 条规则：\n` +
-        matched.map(({ index, rule }) => `  #${index} ${rule.name || '未命名'}: ${(rule.keywords || []).join(', ')}`).join('\n')
+        matched.map(({ index, rule, effectiveReply, effectiveType }) => {
+          const eff = effectiveReply
+            ? (effectiveType === 'image' ? '[图片]' : '') + effectiveReply.substring(0, 30)
+            : '(无回复，跳过)'
+          return `  #${index} ${rule.name || '未命名'} [${(rule.keywords || []).join(', ')}] → ${eff}`
+        }).join('\n')
     })
 }
 
