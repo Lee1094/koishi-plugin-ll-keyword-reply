@@ -1,4 +1,4 @@
-const { Schema } = require('koishi')
+const { Schema, h } = require('koishi')
 const fs = require('fs')
 const path = require('path')
 
@@ -123,7 +123,7 @@ function apply(ctx, config) {
 
       // 发送
       if (replyType === 'image') {
-        await session.send(`[CQ:image,file=${reply}]`)
+        await session.send(h.image(reply))
       } else {
         await session.send(reply)
       }
