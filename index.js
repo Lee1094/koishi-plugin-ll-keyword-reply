@@ -109,7 +109,10 @@ function apply(ctx, config) {
 
   // ===== 中间件 =====
   ctx.middleware(async (session, next) => {
-    const text = session.content?.trim()
+    // 去掉 @机器人 前缀等干扰
+    let text = session.content?.trim() || ''
+    // 去掉开头的 [CQ:at,...]
+    text = text.replace(/\[CQ:at,[^\]]*\]/g, '').trim()
     if (!text) return next()
 
     const today = new Date().getDay()
