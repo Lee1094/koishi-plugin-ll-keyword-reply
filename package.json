@@ -1,0 +1,20 @@
+{
+  "name": "koishi-plugin-keyword-reply",
+  "version": "1.0.0",
+  "description": "Flexible keyword-auto-reply with regex, per-group, weekday scheduling",
+  "main": "index.js",
+  "license": "MIT",
+  "keywords": ["koishi", "koishi-plugin", "keyword", "reply", "auto-reply", "regex"],
+  "peerDependencies": {
+    "koishi": "^4.18.0"
+  },
+  "koishi": {
+    "description": {
+      "zh": "关键词自动回复插件。支持正则/包含匹配、分群回复、星期调度、图片URL回复，控制台Web管理。",
+      "en": "Keyword auto-reply plugin. Regex/contains match, per-group, weekday schedule, web management."
+    },
+    "service": {
+      "required": ["database"]
+    }
+  }
+}
