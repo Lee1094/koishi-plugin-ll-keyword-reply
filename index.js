@@ -28,6 +28,7 @@ function apply(ctx, config) {
 
   // 迁移旧版 rules.json → 数据库（仅首次）
   ;(async () => {
+    if (!hasDB()) return
     try {
       if (fs.existsSync(OLD_RULES_FILE)) {
         const old = JSON.parse(fs.readFileSync(OLD_RULES_FILE, 'utf-8'))
@@ -47,7 +48,6 @@ function apply(ctx, config) {
               })
             }
             ctx.logger.info(`[keyword-reply] 已从 rules.json 迁移 ${old.length} 条规则到数据库`)
-            // 迁移后重命名旧文件
             fs.renameSync(OLD_RULES_FILE, OLD_RULES_FILE + '.bak')
           }
         }
@@ -55,13 +55,19 @@ function apply(ctx, config) {
     } catch {}
   })()
 
-  // 内存缓存（从数据库加载）
+  // 内存缓存
   let rules = []
   let cacheTime = 0
 
+  // 数据库可用性检测
+  function hasDB() {
+    return !!(ctx.database && typeof ctx.database.get === 'function')
+  }
+
   async function loadRules(force) {
     const now = Date.now()
-    if (!force && cacheTime && now - cacheTime < 1000) return // 1 秒缓存
+    if (!force && cacheTime && now - cacheTime < 1000) return
+    if (!hasDB()) return // 数据库不可用，使用空列表
     try {
       rules = await ctx.database.get('keyword_rule', {})
       cacheTime = now
@@ -140,6 +146,11 @@ function apply(ctx, config) {
     }
   })
 
+  // 数据库写操作守卫
+  function requireDB() {
+    if (!hasDB()) throw new Error('数据库服务不可用，请在 Koishi 中安装 database 插件')
+  }
+
   // ===== 管理命令 =====
   ctx.command('keyword', '关键词回复管理')
     .action(() =>
@@ -206,6 +217,7 @@ function apply(ctx, config) {
     .option('matchMode', '-m <mode:string>')
     .action(async ({ session, options }, keywords, reply) => {
       if (!isAdmin(String(session.userId))) return '权限不足'
+      requireDB()
       const kwList = keywords.split(',').map(s => s.trim()).filter(Boolean)
       if (!kwList.length) return '关键词不能为空（多个用逗号分隔）'
       if (!reply) return '默认回复不能为空'
@@ -230,6 +242,7 @@ function apply(ctx, config) {
     .option('matchMode', '-m <mode:string>')
     .action(async ({ session, options }, id, keywords, reply) => {
       if (!isAdmin(String(session.userId))) return '权限不足'
+      requireDB()
       await loadRules(true)
       const rule = rules[id]
       if (!rule) return `未找到规则 #${id}`
@@ -250,6 +263,7 @@ function apply(ctx, config) {
   ctx.command('keyword.remove <id:number>', '删除关键词规则')
     .action(async ({ session }, id) => {
       if (!isAdmin(String(session.userId))) return '权限不足'
+      requireDB()
       await loadRules(true)
       const rule = rules[id]
       if (!rule) return `未找到规则 #${id}`
@@ -261,6 +275,7 @@ function apply(ctx, config) {
   ctx.command('keyword.toggle <id:number>', '启用/禁用关键词规则')
     .action(async ({ session }, id) => {
       if (!isAdmin(String(session.userId))) return '权限不足'
+      requireDB()
       await loadRules(true)
       const rule = rules[id]
       if (!rule) return `未找到规则 #${id}`
@@ -274,6 +289,7 @@ function apply(ctx, config) {
     .option('type', '-t <type:string>')
     .action(async ({ session, options }, id, group, reply) => {
       if (!isAdmin(String(session.userId))) return '权限不足'
+      requireDB()
       await loadRules(true)
       const rule = rules[id]
       if (!rule) return `未找到规则 #${id}`
@@ -296,6 +312,7 @@ function apply(ctx, config) {
   ctx.command('keyword.ungroup <id:number> <group:string>', '移除某条规则在特定群的专属回复')
     .action(async ({ session }, id, group) => {
       if (!isAdmin(String(session.userId))) return '权限不足'
+      requireDB()
       await loadRules(true)
       const rule = rules[id]
       if (!rule) return `未找到规则 #${id}`
@@ -356,4 +373,6 @@ function apply(ctx, config) {
     })
 }
 
-module.exports = { Config, apply }
+const inject = { optional: ['database'] }
+
+module.exports = { Config, apply, inject }
