@@ -1,6 +1,6 @@
 {
   "name": "koishi-plugin-ll-keyword-reply",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Flexible keyword-auto-reply with regex, per-group, weekday scheduling",
   "main": "index.js",
   "license": "MIT",

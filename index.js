@@ -1,4 +1,8 @@
 const { Schema, h } = require('koishi')
+const fs = require('fs')
+const path = require('path')
+
+const OLD_RULES_FILE = path.join(__dirname, 'rules.json')
 
 const Config = Schema.object({
   admins: Schema.array(Schema.string())
@@ -21,6 +25,35 @@ const RuleFields = {
 
 function apply(ctx, config) {
   ctx.model.extend('keyword_rule', RuleFields, { autoInc: true })
+
+  // 迁移旧版 rules.json → 数据库（仅首次）
+  ;(async () => {
+    try {
+      if (fs.existsSync(OLD_RULES_FILE)) {
+        const old = JSON.parse(fs.readFileSync(OLD_RULES_FILE, 'utf-8'))
+        if (Array.isArray(old) && old.length > 0) {
+          const existing = await ctx.database.get('keyword_rule', {})
+          if (!existing.length) {
+            for (const r of old) {
+              await ctx.database.create('keyword_rule', {
+                name: r.name || '',
+                keywords: r.keywords || [],
+                matchMode: r.matchMode || 'contains',
+                weekdays: r.weekdays || [],
+                reply: r.reply || '',
+                replyType: r.replyType || 'text',
+                groupOverrides: r.groupOverrides || [],
+                enabled: r.enabled !== false,
+              })
+            }
+            ctx.logger.info(`[keyword-reply] 已从 rules.json 迁移 ${old.length} 条规则到数据库`)
+            // 迁移后重命名旧文件
+            fs.renameSync(OLD_RULES_FILE, OLD_RULES_FILE + '.bak')
+          }
+        }
+      }
+    } catch {}
+  })()
 
   // 内存缓存（从数据库加载）
   let rules = []
