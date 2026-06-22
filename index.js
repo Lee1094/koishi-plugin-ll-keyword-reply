@@ -163,33 +163,61 @@ function apply(ctx, config) {
   ctx.command('keyword', '关键词回复管理')
     .action(() =>
       '关键词回复管理命令：\n' +
-      'keyword.list — 查看所有规则\n' +
+      'keyword.list [ID] — 查看规则列表/详情\n' +
       'keyword.add <关键词> <默认回复> — 添加规则\n' +
       'keyword.edit <ID> <关键词> <默认回复> — 编辑规则\n' +
       'keyword.remove <ID> — 删除规则\n' +
       'keyword.toggle <ID> — 启用/禁用\n' +
       'keyword.group <ID> <群号> <回复> — 设置某群的专属回复\n' +
       'keyword.ungroup <ID> <群号> — 移除某群的专属回复\n' +
-      'keyword.test <文本> — 测试匹配'
+      'keyword.test <文本> — 测试匹配\n' +
+      'keyword.raw <ID> — 查看原始JSON'
     )
 
-  ctx.command('keyword.list', '查看所有关键词规则')
-    .action(({ session }) => {
+  ctx.command('keyword.list [id:number]', '查看所有规则 / 指定ID查看详情')
+    .action(({ session }, id) => {
       if (!rules.length) return '暂无关键词规则'
-      const currentGroup = session.guildId ? String(session.guildId) : ''
-      return rules.map((r, i) => {
-        const status = r.enabled !== false ? '✅' : '⛔'
-        const mode = r.matchMode === 'regex' ? '[正则]' : '[包含]'
+
+      // 查看单个规则详情
+      if (id !== undefined) {
+        const r = rules[id]
+        if (!r) return `未找到规则 #${id}`
+        const status = r.enabled !== false ? '✅ 启用' : '⛔ 禁用'
+        const mode = r.matchMode === 'regex' ? '正则' : '包含'
         const kws = flatKeywords(r.keywords).join(', ')
-        const defaultReply = r.reply
-          ? (r.replyType === 'image' ? '[图片]' : '') + r.reply.substring(0, 30)
-          : '(无默认)'
-        const overrides = (r.groupOverrides || []).map(o =>
-          `    ${o.group}: ${o.replyType === 'image' ? '[图片]' : ''}${o.reply}`
+        const wd = (r.weekdays || []).length
+          ? (r.weekdays || []).map(d => ['日','一','二','三','四','五','六'][d]).join(', ')
+          : '每天'
+        const defReply = r.reply
+          ? `${r.replyType === 'image' ? '[图片] ' : ''}${r.reply}`
+          : '(无)'
+        const overs = (r.groupOverrides || []).map(o =>
+          `  ${o.group}: ${o.replyType === 'image' ? '[图片]' : ''}${o.reply}`
         ).join('\n')
-        const ovInfo = overrides ? `\n  按群覆盖:\n${overrides}` : ''
-        return `${status} #${i} ${mode} ${r.name || '未命名'}\n  关键词: ${kws}\n  默认: ${defaultReply}${ovInfo}`
-      }).join('\n')
+        return [
+          `📋 规则 #${id}: ${r.name || '未命名'}`,
+          `状态: ${status}`,
+          `匹配模式: ${mode}`,
+          `关键词: ${kws}`,
+          `星期: ${wd}`,
+          `默认回复: ${defReply}`,
+          `按群覆盖: ${overs || '(无)'}`,
+        ].join('\n')
+      }
+
+      // 列表视图
+      const lines = rules.map((r, i) => {
+        const s = r.enabled !== false ? '✅' : '⛔'
+        const m = r.matchMode === 'regex' ? '正' : '含'
+        const kws = flatKeywords(r.keywords).join(', ')
+        const rp = r.reply
+          ? `${r.replyType === 'image' ? '🖼' : '📝'} ${r.reply.substring(0, 25)}${r.reply.length > 25 ? '...' : ''}`
+          : '(无)'
+        const ov = (r.groupOverrides || []).length ? ` +${r.groupOverrides.length}群覆盖` : ''
+        return `${s} #${i} [${m}] ${r.name || '未命名'}${ov}\n  ${kws} → ${rp}`
+      })
+      lines.push(`\n共 ${rules.length} 条规则 | keyword.list <ID> 查看详情`)
+      return lines.join('\n')
     })
 
   ctx.command('keyword.add <keywords:string> <reply:text>', '添加关键词规则（所有群默认回复）')
