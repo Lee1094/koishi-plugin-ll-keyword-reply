@@ -112,15 +112,13 @@ function apply(ctx, config) {
     return { reply: rule.reply, replyType: rule.replyType || 'text' }
   }
 
-  // ===== 中间件 =====
-  ctx.middleware(async (session, next) => {
-    // 去掉 @机器人 前缀等干扰
-    let text = session.content?.trim() || ''
+  // ===== message 事件（在中间件链之前触发，不会被其他插件拦截）=====
+  ctx.on('message', async (session) => {
+    // 跳过机器人自己的消息
+    if (session.userId === session.bot?.selfId) return
     // 去掉所有 CQ 码
-    text = text.replace(/\[CQ:[^\]]*\]/g, '').trim()
-    if (!text) return next()
-
-    ctx.logger.info(`[keyword-reply] 收到消息: "${text}" | 群=${session.guildId || '私聊'} | 用户=${session.userId}`)
+    let text = (session.content || '').replace(/\[CQ:[^\]]*\]/g, '').trim()
+    if (!text) return
 
     const today = new Date().getDay()
     const groupId = session.guildId ? String(session.guildId) : ''
@@ -147,8 +145,6 @@ function apply(ctx, config) {
       const { reply, replyType } = getReply(rule, groupId)
       if (!reply) continue
 
-      ctx.logger.info(`[keyword-reply] 匹配规则 #${rules.indexOf(rule)} "${rule.name}" → 发送${replyType}`)
-
       // 发送
       try {
         if (replyType === 'image') {
@@ -161,8 +157,6 @@ function apply(ctx, config) {
       }
       return
     }
-
-    return next()
   })
 
   // ===== 命令 =====
