@@ -116,9 +116,11 @@ function apply(ctx, config) {
   ctx.middleware(async (session, next) => {
     // 去掉 @机器人 前缀等干扰
     let text = session.content?.trim() || ''
-    // 去掉开头的 [CQ:at,...]
-    text = text.replace(/\[CQ:at,[^\]]*\]/g, '').trim()
+    // 去掉所有 CQ 码
+    text = text.replace(/\[CQ:[^\]]*\]/g, '').trim()
     if (!text) return next()
+
+    ctx.logger.info(`[keyword-reply] 收到消息: "${text}" | 群=${session.guildId || '私聊'} | 用户=${session.userId}`)
 
     const today = new Date().getDay()
     const groupId = session.guildId ? String(session.guildId) : ''
@@ -131,9 +133,8 @@ function apply(ctx, config) {
         if (!rule.weekdays.includes(today)) continue
       }
 
-      // 关键词匹配（自动展开逗号分隔的关键词）
+      // 关键词匹配
       const keywords = flatKeywords(rule.keywords)
-      ctx.logger.debug(`[keyword] rule="${rule.name}" keywords=${JSON.stringify(keywords)} text="${text}"`)
       const matched = keywords.some(kw => {
         if (rule.matchMode === 'regex') {
           try { return new RegExp(kw).test(text) } catch { return false }
@@ -144,13 +145,19 @@ function apply(ctx, config) {
 
       // 获取实际回复（按群覆盖）
       const { reply, replyType } = getReply(rule, groupId)
-      if (!reply) continue  // 该群无回复 → 跳过
+      if (!reply) continue
+
+      ctx.logger.info(`[keyword-reply] 匹配规则 #${rules.indexOf(rule)} "${rule.name}" → 发送${replyType}`)
 
       // 发送
-      if (replyType === 'image') {
-        await session.send(h.image(reply))
-      } else {
-        await session.send(reply)
+      try {
+        if (replyType === 'image') {
+          await session.send(h.image(reply))
+        } else {
+          await session.send(reply)
+        }
+      } catch (e) {
+        ctx.logger.error(`[keyword-reply] 发送失败: ${e.message}`)
       }
       return
     }
