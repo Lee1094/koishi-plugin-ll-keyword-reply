@@ -75,6 +75,10 @@ function apply(ctx, config) {
     })
   }
 
+  function ruleName(rule) {
+    return rule.key || rule.name || '未命名'
+  }
+
   function getReply(rule, groupId) {
     const overs = rule.groupOverrides || []
     const override = overs.find(o => o.group === groupId)
@@ -129,7 +133,7 @@ function apply(ctx, config) {
       '📊 表格管理：控制台 → 插件设置 → ll-keyword-reply（rules 表格可编辑）\n' +
       '💬 命令管理：\n' +
       'keyword.list [ID] — 查看列表/详情\n' +
-      'keyword.add <名称> <关键词,关键词> <回复> — 添加\n' +
+      'keyword.add <关键词> <回复> [-n 名称] — 添加\n' +
       'keyword.edit <ID> <关键词> <回复> — 编辑\n' +
       'keyword.remove <ID> — 删除\n' +
       'keyword.toggle <ID> — 启用/禁用\n' +
@@ -158,7 +162,7 @@ function apply(ctx, config) {
           `  ${o.group}: ${o.replyType === 'image' ? '[图片]' : ''}${o.reply}`
         ).join('\n')
         return [
-          `📋 规则 #${id}: ${r.key || '未命名'}`,
+          `📋 规则 #${id}: ${ruleName(r)}`,
           `状态: ${status}`,
           `匹配模式: ${mode}`,
           `关键词: ${kws}`,
@@ -176,7 +180,7 @@ function apply(ctx, config) {
           ? `${r.replyType === 'image' ? '🖼' : '📝'} ${r.reply.substring(0, 25)}${r.reply.length > 25 ? '...' : ''}`
           : '(无)'
         const ov = (r.groupOverrides || []).length ? ` +${r.groupOverrides.length}群覆盖` : ''
-        return `${s} #${i} [${m}] ${r.key || '未命名'}${ov}\n  ${kws} → ${rp}`
+        return `${s} #${i} [${m}] ${ruleName(r)}${ov}\n  ${kws} → ${rp}`
       })
       lines.push(`\n共 ${rules.length} 条 | keyword.list <ID> 详情`)
       return lines.join('\n')
@@ -205,7 +209,7 @@ function apply(ctx, config) {
       }
       rules.push(rule)
       syncRules()
-      return `✅ 已添加规则 #${rules.length - 1}: ${rule.key} [${rule.matchMode}]`
+      return `✅ 已添加规则 #${rules.length - 1}: ${ruleName(rule)} [${rule.matchMode}]`
     })
 
   ctx.command('keyword.edit <id:number> <keywords:string> <reply:text>', '编辑规则')
@@ -222,14 +226,14 @@ function apply(ctx, config) {
       if (options.type) rule.replyType = options.type
       if (options.matchMode) rule.matchMode = options.matchMode
       syncRules()
-      return `✅ 已更新规则 #${id}: ${rule.key}`
+      return `✅ 已更新规则 #${id}: ${ruleName(rule)}`
     })
 
   ctx.command('keyword.remove <id:number>', '删除规则')
     .action(({ session }, id) => {
       if (!isAdmin(String(session.userId))) return '权限不足'
       if (id < 0 || id >= rules.length) return `未找到规则 #${id}`
-      const name = rules[id].key || '未命名'
+      const name = ruleName(rules[id])
       rules.splice(id, 1)
       syncRules()
       return `✅ 已删除规则 #${id}: ${name}`
@@ -242,7 +246,7 @@ function apply(ctx, config) {
       if (!rule) return `未找到规则 #${id}`
       rule.enabled = !rule.enabled
       syncRules()
-      return `${rule.enabled ? '✅ 已启用' : '⛔ 已禁用'} 规则 #${id}: ${rule.key || '未命名'}`
+      return `${rule.enabled ? '✅ 已启用' : '⛔ 已禁用'} 规则 #${id}: ${ruleName(rule)}`
     })
 
   ctx.command('keyword.group <id:number> <group:string> <reply:text>', '设置某群专属回复')
@@ -317,7 +321,7 @@ function apply(ctx, config) {
           const eff = effectiveReply
             ? (effectiveType === 'image' ? '[图片]' : '') + effectiveReply.substring(0, 30)
             : '(无回复，跳过)'
-          return `  #${index} ${rule.key || '未命名'} [${flatKeywords(rule.keywords).join(', ')}] → ${eff}`
+          return `  #${index} ${ruleName(rule)} [${flatKeywords(rule.keywords).join(', ')}] → ${eff}`
         }).join('\n')
     })
 }
