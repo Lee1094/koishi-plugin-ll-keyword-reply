@@ -1,5 +1,5 @@
 {
-  "name": "koishi-plugin-keyword-reply",
+  "name": "koishi-plugin-ll-keyword-reply",
   "version": "1.0.0",
   "description": "Flexible keyword-auto-reply with regex, per-group, weekday scheduling",
   "main": "index.js",
