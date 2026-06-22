@@ -74,16 +74,21 @@ function apply(ctx, config) {
     saveRules(rules)
   }
 
-  // 展开关键词中可能包含逗号的条目（兼容设置页多词写在一个框里的情况）
+  // 展开关键词（兼容数组/字符串、逗号分隔等各种格式）
   function flatKeywords(keywords) {
     if (!keywords) return []
+    // 兼容字符串（设置页 YAML 可能存成字符串而非数组）
+    if (typeof keywords === 'string') {
+      return keywords.split(',').map(s => s.trim()).filter(Boolean)
+    }
+    if (!Array.isArray(keywords)) return []
     const result = []
     for (const kw of keywords) {
       if (typeof kw !== 'string' || !kw) continue
       if (kw.includes(',')) {
         result.push(...kw.split(',').map(s => s.trim()).filter(Boolean))
       } else {
-        result.push(kw)
+        result.push(kw.trim())
       }
     }
     return result
@@ -127,7 +132,9 @@ function apply(ctx, config) {
       }
 
       // 关键词匹配（自动展开逗号分隔的关键词）
-      const matched = flatKeywords(rule.keywords).some(kw => {
+      const keywords = flatKeywords(rule.keywords)
+      ctx.logger.debug(`[keyword] rule="${rule.name}" keywords=${JSON.stringify(keywords)} text="${text}"`)
+      const matched = keywords.some(kw => {
         if (rule.matchMode === 'regex') {
           try { return new RegExp(kw).test(text) } catch { return false }
         }
@@ -172,7 +179,7 @@ function apply(ctx, config) {
       return rules.map((r, i) => {
         const status = r.enabled !== false ? '✅' : '⛔'
         const mode = r.matchMode === 'regex' ? '[正则]' : '[包含]'
-        const kws = (r.keywords || []).join(', ')
+        const kws = flatKeywords(r.keywords).join(', ')
         const defaultReply = r.reply
           ? (r.replyType === 'image' ? '[图片]' : '') + r.reply.substring(0, 30)
           : '(无默认)'
@@ -278,6 +285,14 @@ function apply(ctx, config) {
       rule.groupOverrides.splice(idx, 1)
       syncRules()
       return `✅ 已移除规则 #${id} 在群 ${group} 的专属回复，恢复使用默认回复`
+    })
+
+  ctx.command('keyword.raw <id:number>', '查看规则原始数据（调试用）')
+    .action(({ session }, id) => {
+      if (!isAdmin(String(session.userId))) return '权限不足'
+      const rule = rules[id]
+      if (!rule) return `未找到规则 #${id}`
+      return JSON.stringify(rule, null, 2)
     })
 
   ctx.command('keyword.test <text:text>', '测试关键词匹配')
